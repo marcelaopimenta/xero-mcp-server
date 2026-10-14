@@ -156,3 +156,29 @@ describe("formatError", () => {
     });
   });
 });
+
+describe("xero-node 13 rejection shapes", () => {
+  it("surfaces the problem Detail for {response: {status}, body}", () => {
+    const err = {
+      response: { status: 403 },
+      body: { Type: "Problem", Title: "Forbidden", Detail: "insufficient scope: accounting.attachments" },
+    };
+    const out = formatError(err);
+    expect(out).toContain("403");
+    expect(out).toContain("insufficient scope: accounting.attachments");
+  });
+
+  it("surfaces a JSON-string rejection", () => {
+    const out = formatError(JSON.stringify({ response: { status: 429 }, body: { Detail: "Rate limit exceeded" } }));
+    expect(out).toContain("429");
+    expect(out).toContain("Rate limit exceeded");
+  });
+
+  it("never echoes a payload it cannot parse", () => {
+    expect(formatError("not-json Bearer SECRET-TOKEN")).not.toContain("SECRET-TOKEN");
+  });
+
+  it("reports the status when the SDK error carries no detail", () => {
+    expect(formatError({ response: { status: 500 }, body: {} })).toContain("500");
+  });
+});

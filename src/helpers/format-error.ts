@@ -1,79 +1,92 @@
 import { AxiosError } from "axios";
 
-interface XeroSdkProblem {
-  title?: string;
-  detail?: string;
-  status?: number;
+const HTTP_STATUS_MESSAGES: Record<number, string> = {
+    401: "Authentication failed. Please check your Xero credentials.",
+    403: "You don't have permission to access this resource in Xero.",
+    404: "The requested resource was not found in Xero.",
+    429: "Too many requests to Xero. Please try again in a moment.",
+};
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+    if (typeof value === "object" && value !== null) return value as Record<string, unknown>;
+    if (typeof value !== "string") return undefined;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
-interface XeroSdkError {
-  response: {
-    statusCode: number;
-    body?: {
-      httpStatusCode?: string;
-      problem?: XeroSdkProblem;
-      Detail?: string;
-    };
-  };
+function numeric(value: unknown): number | undefined {
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
 }
 
-function isXeroSdkError(error: unknown): error is XeroSdkError {
-  if (typeof error !== "object" || error === null) return false;
-  const response = (error as { response?: unknown }).response;
-  if (typeof response !== "object" || response === null) return false;
-  return typeof (response as { statusCode?: unknown }).statusCode === "number";
+function text(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number") return String(value);
+    return undefined;
 }
 
-function formatHttpStatus(status: number): string {
-  switch (status) {
-    case 401:
-      return "Authentication failed. Please check your Xero credentials.";
-    case 403:
-      return "You don't have permission to access this resource in Xero.";
-    case 404:
-      return "The requested resource was not found in Xero.";
-    case 429:
-      return "Too many requests to Xero. Please try again in a moment.";
-    default:
-      return "";
-  }
+/** A xero-node rejection is `{ response, body }`; the response carries status or statusCode. */
+function statusOf(error: Record<string, unknown>): number | undefined {
+    const response = asObject(error.response);
+    if (response === undefined) return undefined;
+    return typeof response.statusCode === "number" ? response.statusCode : numeric(response.status);
 }
 
 /**
  * Format error messages for return to the LLM.
  *
- * Never stringify unknown error objects — the xero-node SDK rejects with a
+ * Never stringify unknown error objects  the xero-node SDK rejects with a
  * plain object whose `request.headers.authorization` field contains the
- * caller's Bearer token. Whitelist the fields we extract so secrets never
- * reach the response.
+ * caller's Bearer token. Only whitelisted fields (status, title, detail) are
+ * extracted so secrets never reach the response.
  */
 export function formatError(error: unknown): string {
-  if (error instanceof AxiosError) {
-    const status = error.response?.status;
-    const detail = error.response?.data?.Detail;
-
-    if (status !== undefined) {
-      const mapped = formatHttpStatus(status);
-      if (mapped) return mapped;
+    if (error instanceof AxiosError) {
+        const statusCode = error.response?.status;
+        const detail = text((error.response?.data as Record<string, unknown> | undefined)?.Detail);
+        const mapped = statusCode !== undefined ? HTTP_STATUS_MESSAGES[statusCode] : undefined;
+        return mapped ?? detail ?? "An error occurred while communicating with Xero.";
     }
-    return detail || "An error occurred while communicating with Xero.";
-  }
 
-  if (isXeroSdkError(error)) {
-    const status = error.response.statusCode;
-    const mapped = formatHttpStatus(status);
-    if (mapped) return mapped;
+    // xero-node@13 also rejects with a JSON string built from the response body.
+    const payload = typeof error === "string" ? asObject(error) : (error as Record<string, unknown> | null | undefined);
+    const response = payload === undefined || payload === null ? undefined : asObject(payload.response);
+    const source =
+        payload === undefined || payload === null
+            ? undefined
+            : (asObject(payload.body) ?? asObject(response?.body) ?? payload);
+    const problem = asObject(source?.problem);
 
-    const body = error.response.body;
-    const problem = body?.problem;
-    const title = problem?.title ?? body?.httpStatusCode ?? "HTTP error";
-    const detail = problem?.detail ?? body?.Detail;
-    return detail ? `${status} ${title}: ${detail}` : `${status} ${title}`;
-  }
+    const statusCode =
+        (payload === undefined || payload === null ? undefined : statusOf(payload)) ??
+        numeric(source?.status) ??
+        numeric(source?.httpStatusCode);
+    const title =
+        text(problem?.title) ??
+        text(source?.Title) ??
+        text(source?.title) ??
+        text(source?.httpStatusCode) ??
+        text(source?.status);
+    const detail = text(problem?.detail) ?? text(source?.Detail) ?? text(source?.detail);
 
-  if (error instanceof Error) {
-    return error.message;
-  }
+    if (statusCode !== undefined) {
+        const mapped = HTTP_STATUS_MESSAGES[statusCode];
+        const summary = detail !== undefined ? `${statusCode} ${title ?? "HTTP error"}: ${detail}` : `${statusCode} ${title ?? "HTTP error"}`;
+        if (mapped !== undefined) return detail !== undefined ? `${mapped} (${statusCode} ${detail})` : mapped;
+        return summary;
+    }
+    if (title !== undefined || detail !== undefined) {
+        return detail !== undefined ? `${title ?? "HTTP error"}: ${detail}` : (title as string);
+    }
+    if (error instanceof Error) return error.message;
 
-  return "An unexpected error occurred while communicating with Xero.";
+    return "An unexpected error occurred while communicating with Xero.";
 }
