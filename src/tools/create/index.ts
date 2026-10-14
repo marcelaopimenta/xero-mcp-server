@@ -1,3 +1,4 @@
+import CreateInvoiceAttachmentTool from "./create-invoice-attachment.tool.js";
 import CreateBankTransactionTool from "./create-bank-transaction.tool.js";
 import CreateContactTool from "./create-contact.tool.js";
 import CreateCreditNoteTool from "./create-credit-note.tool.js";
@@ -21,5 +22,6 @@ export const CreateTools = [
   CreateBankTransactionTool,
   CreatePayrollTimesheetTool,
   CreateTrackingCategoryTool,
-  CreateTrackingOptionsTool
+  CreateTrackingOptionsTool,
+  CreateInvoiceAttachmentTool,
 ];

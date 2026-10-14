@@ -1,3 +1,4 @@
+import ListInvoiceAttachmentsTool from "./list-invoice-attachments.tool.js";
 import ListAccountsTool from "./list-accounts.tool.js";
 import ListAgedPayablesByContact from "./list-aged-payables-by-contact.tool.js";
 import ListAgedReceivablesByContact
@@ -54,5 +55,6 @@ export const ListTools = [
   ListAgedPayablesByContact,
   ListPayrollTimesheetsTool,
   ListContactGroupsTool,
-  ListTrackingCategoriesTool
+  ListTrackingCategoriesTool,
+  ListInvoiceAttachmentsTool,
 ];
